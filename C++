@@ -1,0 +1,857 @@
+#include <iostream>
+#include <mysql_driver.h>
+#include <mysql_connection.h>
+#include <cppconn/statement.h>
+#include <cppconn/prepared_statement.h>
+#include <cppconn/resultset.h>
+#include <memory>
+#include <iomanip>
+#include <ctime>
+#include <sstream>
+#include <limits>
+
+using namespace std;
+
+// ==================== DATABASE CONFIGURATION ====================
+class DatabaseConfig {
+public:
+    static const string HOST;
+    static const string USER;
+    static const string PASSWORD;
+    static const string DATABASE;
+};
+
+const string DatabaseConfig::HOST = "tcp://127.0.0.1:3306";
+const string DatabaseConfig::USER = "root";
+const string DatabaseConfig::PASSWORD = "your_password";  // CHANGE THIS
+const string DatabaseConfig::DATABASE = "placement_system";
+
+// ==================== BASE CLASS ====================
+class Person {
+protected:
+    int id;
+    string name;
+    string email;
+    string phone;
+
+public:
+    Person() : id(0) {}
+    virtual ~Person() {}
+    
+    // Getters
+    int getId() const { return id; }
+    string getName() const { return name; }
+    string getEmail() const { return email; }
+    
+    // Virtual functions
+    virtual void displayInfo() = 0;  // Pure virtual
+    virtual string getRole() = 0;    // Pure virtual
+    
+    // Setters
+    void setName(const string& n) { name = n; }
+    void setEmail(const string& e) { email = e; }
+    void setPhone(const string& p) { phone = p; }
+};
+
+// ==================== STUDENT CLASS (Inheritance) ====================
+class Student : public Person {
+private:
+    string rollNumber;
+    string department;
+    int semester;
+    double cgpa;
+    string skills;
+    string placementStatus;
+
+public:
+    Student() : semester(0), cgpa(0.0) {}
+    
+    string getRole() override { return "Student"; }
+    
+    void displayInfo() override {
+        cout << "\n=== STUDENT DETAILS ===" << endl;
+        cout << "Roll Number: " << rollNumber << endl;
+        cout << "Name: " << name << endl;
+        cout << "Email: " << email << endl;
+        cout << "Phone: " << phone << endl;
+        cout << "Department: " << department << endl;
+        cout << "Semester: " << semester << endl;
+        cout << "CGPA: " << fixed << setprecision(2) << cgpa << endl;
+        cout << "Skills: " << skills << endl;
+        cout << "Placement Status: " << placementStatus << endl;
+    }
+    
+    bool isEligibleForJob(double minCGPA) {
+        return cgpa >= minCGPA;
+    }
+    
+    // Setters
+    void setRollNumber(const string& rn) { rollNumber = rn; }
+    void setDepartment(const string& dept) { department = dept; }
+    void setSemester(int sem) { semester = sem; }
+    void setCgpa(double c) { cgpa = c; }
+    void setSkills(const string& s) { skills = s; }
+    void setPlacementStatus(const string& status) { placementStatus = status; }
+    
+    friend class PlacementSystem;
+};
+
+// ==================== COMPANY CLASS (Inheritance) ====================
+class Company : public Person {
+private:
+    string industry;
+    string location;
+    string website;
+    string description;
+
+public:
+    string getRole() override { return "Company"; }
+    
+    void displayInfo() override {
+        cout << "\n=== COMPANY DETAILS ===" << endl;
+        cout << "Company ID: " << id << endl;
+        cout << "Name: " << name << endl;
+        cout << "Industry: " << industry << endl;
+        cout << "Location: " << location << endl;
+        cout << "Website: " << website << endl;
+        cout << "Contact Email: " << email << endl;
+        cout << "Contact Phone: " << phone << endl;
+        cout << "Description: " << description << endl;
+    }
+    
+    // Setters
+    void setIndustry(const string& ind) { industry = ind; }
+    void setLocation(const string& loc) { location = loc; }
+    void setWebsite(const string& web) { website = web; }
+    void setDescription(const string& desc) { description = desc; }
+    
+    friend class PlacementSystem;
+};
+
+// ==================== JOB CLASS ====================
+class Job {
+private:
+    int jobId;
+    int companyId;
+    string companyName;
+    string jobTitle;
+    string jobDescription;
+    double package;
+    string location;
+    double minCGPA;
+    string lastDate;
+    string driveDate;
+    string status;
+
+public:
+    Job() : jobId(0), companyId(0), package(0.0), minCGPA(0.0) {}
+    
+    void displayJobInfo() {
+        cout << "\nJob ID: " << jobId << endl;
+        cout << "Company: " << companyName << endl;
+        cout << "Title: " << jobTitle << endl;
+        cout << "Package: ₹" << fixed << setprecision(2) << package << "/year" << endl;
+        cout << "Location: " << location << endl;
+        cout << "Minimum CGPA: " << minCGPA << endl;
+        cout << "Last Date: " << lastDate << endl;
+        cout << "Drive Date: " << driveDate << endl;
+        cout << "Status: " << status << endl;
+    }
+    
+    friend class PlacementSystem;
+};
+
+// ==================== APPLICATION CLASS ====================
+class Application {
+private:
+    int applicationId;
+    int studentId;
+    string studentName;
+    int jobId;
+    string jobTitle;
+    string companyName;
+    string applicationDate;
+    string status;
+    string interviewDate;
+    string feedback;
+
+public:
+    void displayApplication() {
+        cout << "\nApplication ID: " << applicationId << endl;
+        cout << "Student: " << studentName << " (ID: " << studentId << ")" << endl;
+        cout << "Job: " << jobTitle << " at " << companyName << endl;
+        cout << "Applied on: " << applicationDate << endl;
+        cout << "Status: " << status << endl;
+        if (!interviewDate.empty() && interviewDate != "0000-00-00") {
+            cout << "Interview Date: " << interviewDate << endl;
+        }
+        if (!feedback.empty()) {
+            cout << "Feedback: " << feedback << endl;
+        }
+    }
+    
+    friend class PlacementSystem;
+};
+
+// ==================== PLACEMENT SYSTEM MAIN CLASS ====================
+class PlacementSystem {
+private:
+    sql::mysql::MySQL_Driver *driver;
+    unique_ptr<sql::Connection> conn;
+    
+    // Database connection
+    bool connectToDatabase() {
+        try {
+            driver = sql::mysql::get_mysql_driver_instance();
+            conn = unique_ptr<sql::Connection>(driver->connect(
+                DatabaseConfig::HOST, 
+                DatabaseConfig::USER, 
+                DatabaseConfig::PASSWORD
+            ));
+            conn->setSchema(DatabaseConfig::DATABASE);
+            return true;
+        } catch (sql::SQLException &e) {
+            cerr << "Database connection failed: " << e.what() << endl;
+            return false;
+        }
+    }
+
+public:
+    PlacementSystem() {
+        if (!connectToDatabase()) {
+            throw runtime_error("Failed to connect to database");
+        }
+        cout << "✅ Connected to Placement System Database!" << endl;
+    }
+    
+    ~PlacementSystem() {
+        if (conn) {
+            conn->close();
+        }
+    }
+    
+    // ================ STUDENT MANAGEMENT ================
+    
+    // Add new student
+    bool addStudent() {
+        try {
+            Student s;
+            string roll, dept, skills;
+            int sem;
+            double cgpa;
+            
+            cout << "\n=== ADD NEW STUDENT ===" << endl;
+            cout << "Enter Roll Number: ";
+            cin.ignore();
+            getline(cin, roll);
+            
+            cout << "Enter Name: ";
+            getline(cin, s.name);
+            
+            cout << "Enter Email: ";
+            getline(cin, s.email);
+            
+            cout << "Enter Phone: ";
+            getline(cin, s.phone);
+            
+            cout << "Enter Department: ";
+            getline(cin, dept);
+            
+            cout << "Enter Semester: ";
+            cin >> sem;
+            
+            cout << "Enter CGPA: ";
+            cin >> cgpa;
+            
+            cout << "Enter Skills (comma separated): ";
+            cin.ignore();
+            getline(cin, skills);
+            
+            // Check if student already exists
+            unique_ptr<sql::PreparedStatement> checkStmt(
+                conn->prepareStatement("SELECT student_id FROM students WHERE roll_number = ? OR email = ?")
+            );
+            checkStmt->setString(1, roll);
+            checkStmt->setString(2, s.email);
+            
+            unique_ptr<sql::ResultSet> checkRes(checkStmt->executeQuery());
+            if (checkRes->next()) {
+                cout << "❌ Student with this Roll Number or Email already exists!" << endl;
+                return false;
+            }
+            
+            // Insert into database
+            unique_ptr<sql::PreparedStatement> pstmt(
+                conn->prepareStatement(
+                    "INSERT INTO students (roll_number, name, email, phone, department, semester, cgpa, skills) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                )
+            );
+            
+            pstmt->setString(1, roll);
+            pstmt->setString(2, s.name);
+            pstmt->setString(3, s.email);
+            pstmt->setString(4, s.phone);
+            pstmt->setString(5, dept);
+            pstmt->setInt(6, sem);
+            pstmt->setDouble(7, cgpa);
+            pstmt->setString(8, skills);
+            
+            if (pstmt->executeUpdate()) {
+                cout << "✅ Student added successfully!" << endl;
+                
+                // Get generated ID
+                unique_ptr<sql::Statement> stmt(conn->createStatement());
+                unique_ptr<sql::ResultSet> res(stmt->executeQuery("SELECT LAST_INSERT_ID() as id"));
+                if (res->next()) {
+                    cout << "Student ID: " << res->getInt("id") << endl;
+                }
+                return true;
+            }
+        } catch (sql::SQLException &e) {
+            cerr << "Error adding student: " << e.what() << endl;
+        }
+        return false;
+    }
+    
+    // View all students
+    void viewAllStudents() {
+        try {
+            unique_ptr<sql::Statement> stmt(conn->createStatement());
+            unique_ptr<sql::ResultSet> res(stmt->executeQuery(
+                "SELECT student_id, roll_number, name, department, semester, cgpa, placement_status FROM students"
+            ));
+            
+            cout << "\n=== ALL STUDENTS ===" << endl;
+            cout << left << setw(10) << "ID" 
+                 << setw(15) << "Roll No"
+                 << setw(25) << "Name"
+                 << setw(15) << "Department"
+                 << setw(10) << "Sem"
+                 << setw(8) << "CGPA"
+                 << "Status" << endl;
+            cout << string(90, '-') << endl;
+            
+            while (res->next()) {
+                cout << left << setw(10) << res->getInt("student_id")
+                     << setw(15) << res->getString("roll_number")
+                     << setw(25) << res->getString("name")
+                     << setw(15) << res->getString("department")
+                     << setw(10) << res->getInt("semester")
+                     << setw(8) << fixed << setprecision(2) << res->getDouble("cgpa")
+                     << res->getString("placement_status") << endl;
+            }
+            
+        } catch (sql::SQLException &e) {
+            cerr << "Error: " << e.what() << endl;
+        }
+    }
+    
+    // View student details by ID
+    void viewStudentDetails(int studentId) {
+        try {
+            unique_ptr<sql::PreparedStatement> pstmt(
+                conn->prepareStatement("SELECT * FROM students WHERE student_id = ?")
+            );
+            pstmt->setInt(1, studentId);
+            
+            unique_ptr<sql::ResultSet> res(pstmt->executeQuery());
+            
+            if (res->next()) {
+                Student s;
+                s.id = res->getInt("student_id");
+                s.name = res->getString("name");
+                s.email = res->getString("email");
+                s.phone = res->getString("phone");
+                string roll = res->getString("roll_number");
+                string dept = res->getString("department");
+                int sem = res->getInt("semester");
+                double cgpa = res->getDouble("cgpa");
+                string skills = res->getString("skills");
+                string status = res->getString("placement_status");
+                
+                s.setRollNumber(roll);
+                s.setDepartment(dept);
+                s.setSemester(sem);
+                s.setCgpa(cgpa);
+                s.setSkills(skills);
+                s.setPlacementStatus(status);
+                
+                s.displayInfo();
+                
+                // Show applications for this student
+                viewStudentApplications(studentId);
+                
+            } else {
+                cout << "❌ Student not found!" << endl;
+            }
+        } catch (sql::SQLException &e) {
+            cerr << "Error: " << e.what() << endl;
+        }
+    }
+    
+    // ================ COMPANY MANAGEMENT ================
+    
+    // Add new company
+    bool addCompany() {
+        try {
+            Company c;
+            string industry, location, website, desc;
+            
+            cout << "\n=== ADD NEW COMPANY ===" << endl;
+            cout << "Enter Company Name: ";
+            cin.ignore();
+            getline(cin, c.name);
+            
+            cout << "Enter Industry: ";
+            getline(cin, industry);
+            
+            cout << "Enter Location: ";
+            getline(cin, location);
+            
+            cout << "Enter Website: ";
+            getline(cin, website);
+            
+            cout << "Enter Contact Email: ";
+            getline(cin, c.email);
+            
+            cout << "Enter Contact Phone: ";
+            getline(cin, c.phone);
+            
+            cout << "Enter Description: ";
+            getline(cin, desc);
+            
+            // Insert into database
+            unique_ptr<sql::PreparedStatement> pstmt(
+                conn->prepareStatement(
+                    "INSERT INTO companies (company_name, industry, location, website, contact_email, contact_phone, description) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)"
+                )
+            );
+            
+            pstmt->setString(1, c.name);
+            pstmt->setString(2, industry);
+            pstmt->setString(3, location);
+            pstmt->setString(4, website);
+            pstmt->setString(5, c.email);
+            pstmt->setString(6, c.phone);
+            pstmt->setString(7, desc);
+            
+            if (pstmt->executeUpdate()) {
+                cout << "✅ Company added successfully!" << endl;
+                
+                // Get generated ID
+                unique_ptr<sql::Statement> stmt(conn->createStatement());
+                unique_ptr<sql::ResultSet> res(stmt->executeQuery("SELECT LAST_INSERT_ID() as id"));
+                if (res->next()) {
+                    cout << "Company ID: " << res->getInt("id") << endl;
+                }
+                return true;
+            }
+        } catch (sql::SQLException &e) {
+            cerr << "Error adding company: " << e.what() << endl;
+        }
+        return false;
+    }
+    
+    // View all companies
+    void viewAllCompanies() {
+        try {
+            unique_ptr<sql::Statement> stmt(conn->createStatement());
+            unique_ptr<sql::ResultSet> res(stmt->executeQuery(
+                "SELECT company_id, company_name, industry, location, contact_email FROM companies"
+            ));
+            
+            cout << "\n=== ALL COMPANIES ===" << endl;
+            cout << left << setw(10) << "ID" 
+                 << setw(25) << "Company Name"
+                 << setw(20) << "Industry"
+                 << setw(20) << "Location"
+                 << "Contact Email" << endl;
+            cout << string(90, '-') << endl;
+            
+            while (res->next()) {
+                cout << left << setw(10) << res->getInt("company_id")
+                     << setw(25) << res->getString("company_name")
+                     << setw(20) << res->getString("industry")
+                     << setw(20) << res->getString("location")
+                     << res->getString("contact_email") << endl;
+            }
+            
+        } catch (sql::SQLException &e) {
+            cerr << "Error: " << e.what() << endl;
+        }
+    }
+    
+    // ================ JOB MANAGEMENT ================
+    
+    // Add new job
+    bool addJob() {
+        try {
+            int companyId;
+            string title, desc, location, lastDate, driveDate;
+            double package, minCGPA;
+            
+            cout << "\n=== ADD NEW JOB ===" << endl;
+            
+            // Show companies first
+            viewAllCompanies();
+            
+            cout << "Enter Company ID: ";
+            cin >> companyId;
+            
+            // Verify company exists
+            unique_ptr<sql::PreparedStatement> checkStmt(
+                conn->prepareStatement("SELECT company_name FROM companies WHERE company_id = ?")
+            );
+            checkStmt->setInt(1, companyId);
+            
+            unique_ptr<sql::ResultSet> checkRes(checkStmt->executeQuery());
+            if (!checkRes->next()) {
+                cout << "❌ Company not found!" << endl;
+                return false;
+            }
+            
+            cout << "Enter Job Title: ";
+            cin.ignore();
+            getline(cin, title);
+            
+            cout << "Enter Job Description: ";
+            getline(cin, desc);
+            
+            cout << "Enter Package (per annum): ₹";
+            cin >> package;
+            
+            cout << "Enter Job Location: ";
+            cin.ignore();
+            getline(cin, location);
+            
+            cout << "Enter Minimum CGPA Required: ";
+            cin >> minCGPA;
+            
+            cout << "Enter Last Application Date (YYYY-MM-DD): ";
+            cin >> lastDate;
+            
+            cout << "Enter Drive Date (YYYY-MM-DD): ";
+            cin >> driveDate;
+            
+            // Insert into database
+            unique_ptr<sql::PreparedStatement> pstmt(
+                conn->prepareStatement(
+                    "INSERT INTO jobs (company_id, job_title, job_description, package, location, min_cgpa, last_application_date, drive_date) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                )
+            );
+            
+            pstmt->setInt(1, companyId);
+            pstmt->setString(2, title);
+            pstmt->setString(3, desc);
+            pstmt->setDouble(4, package);
+            pstmt->setString(5, location);
+            pstmt->setDouble(6, minCGPA);
+            pstmt->setString(7, lastDate);
+            pstmt->setString(8, driveDate);
+            
+            if (pstmt->executeUpdate()) {
+                cout << "✅ Job added successfully!" << endl;
+                return true;
+            }
+        } catch (sql::SQLException &e) {
+            cerr << "Error adding job: " << e.what() << endl;
+        }
+        return false;
+    }
+    
+    // View all jobs
+    void viewAllJobs() {
+        try {
+            unique_ptr<sql::Statement> stmt(conn->createStatement());
+            unique_ptr<sql::ResultSet> res(stmt->executeQuery(
+                "SELECT j.job_id, c.company_name, j.job_title, j.package, j.location, "
+                "j.min_cgpa, j.last_application_date, j.status "
+                "FROM jobs j JOIN companies c ON j.company_id = c.company_id"
+            ));
+            
+            cout << "\n=== ALL JOBS ===" << endl;
+            cout << left << setw(8) << "Job ID" 
+                 << setw(20) << "Company"
+                 << setw(25) << "Title"
+                 << setw(12) << "Package"
+                 << setw(15) << "Location"
+                 << setw(8) << "Min CGPA"
+                 << setw(12) << "Last Date"
+                 << "Status" << endl;
+            cout << string(110, '-') << endl;
+            
+            while (res->next()) {
+                cout << left << setw(8) << res->getInt("job_id")
+                     << setw(20) << res->getString("company_name")
+                     << setw(25) << res->getString("job_title")
+                     << "₹" << setw(11) << fixed << setprecision(2) << res->getDouble("package")
+                     << setw(15) << res->getString("location")
+                     << setw(8) << res->getDouble("min_cgpa")
+                     << setw(12) << res->getString("last_application_date")
+                     << res->getString("status") << endl;
+            }
+            
+        } catch (sql::SQLException &e) {
+            cerr << "Error: " << e.what() << endl;
+        }
+    }
+    
+    // View jobs by company
+    void viewJobsByCompany(int companyId) {
+        try {
+            unique_ptr<sql::PreparedStatement> pstmt(
+                conn->prepareStatement(
+                    "SELECT j.job_id, j.job_title, j.package, j.location, j.min_cgpa, "
+                    "j.last_application_date, j.status, c.company_name "
+                    "FROM jobs j JOIN companies c ON j.company_id = c.company_id "
+                    "WHERE j.company_id = ?"
+                )
+            );
+            pstmt->setInt(1, companyId);
+            
+            unique_ptr<sql::ResultSet> res(pstmt->executeQuery());
+            
+            cout << "\n=== JOBS FOR COMPANY ID " << companyId << " ===" << endl;
+            
+            bool found = false;
+            while (res->next()) {
+                found = true;
+                Job j;
+                j.jobId = res->getInt("job_id");
+                j.companyName = res->getString("company_name");
+                j.jobTitle = res->getString("job_title");
+                j.package = res->getDouble("package");
+                j.location = res->getString("location");
+                j.minCGPA = res->getDouble("min_cgpa");
+                j.lastDate = res->getString("last_application_date");
+                j.status = res->getString("status");
+                
+                j.displayJobInfo();
+            }
+            
+            if (!found) {
+                cout << "No jobs found for this company." << endl;
+            }
+            
+        } catch (sql::SQLException &e) {
+            cerr << "Error: " << e.what() << endl;
+        }
+    }
+    
+    // ================ APPLICATION MANAGEMENT ================
+    
+    // Student applies for job
+    bool applyForJob(int studentId) {
+        try {
+            // Check if student exists and is eligible
+            unique_ptr<sql::PreparedStatement> studentStmt(
+                conn->prepareStatement("SELECT name, cgpa, placement_status FROM students WHERE student_id = ?")
+            );
+            studentStmt->setInt(1, studentId);
+            
+            unique_ptr<sql::ResultSet> studentRes(studentStmt->executeQuery());
+            if (!studentRes->next()) {
+                cout << "❌ Student not found!" << endl;
+                return false;
+            }
+            
+            string studentName = studentRes->getString("name");
+            double studentCGPA = studentRes->getDouble("cgpa");
+            string placementStatus = studentRes->getString("placement_status");
+            
+            if (placementStatus == "Placed") {
+                cout << "❌ Student is already placed! Cannot apply for more jobs." << endl;
+                return false;
+            }
+            
+            // Show available jobs
+            cout << "\n=== AVAILABLE JOBS ===" << endl;
+            viewAllJobs();
+            
+            int jobId;
+            cout << "Enter Job ID to apply: ";
+            cin >> jobId;
+            
+            // Check job eligibility
+            unique_ptr<sql::PreparedStatement> jobStmt(
+                conn->prepareStatement(
+                    "SELECT j.job_title, j.min_cgpa, j.status, c.company_name "
+                    "FROM jobs j JOIN companies c ON j.company_id = c.company_id "
+                    "WHERE j.job_id = ?"
+                )
+            );
+            jobStmt->setInt(1, jobId);
+            
+            unique_ptr<sql::ResultSet> jobRes(jobStmt->executeQuery());
+            if (!jobRes->next()) {
+                cout << "❌ Job not found!" << endl;
+                return false;
+            }
+            
+            string jobTitle = jobRes->getString("job_title");
+            double minCGPA = jobRes->getDouble("min_cgpa");
+            string jobStatus = jobRes->getString("status");
+            string companyName = jobRes->getString("company_name");
+            
+            if (jobStatus != "Open") {
+                cout << "❌ This job is no longer open for applications." << endl;
+                return false;
+            }
+            
+            if (studentCGPA < minCGPA) {
+                cout << "❌ You are not eligible! Required CGPA: " << minCGPA 
+                     << ", Your CGPA: " << studentCGPA << endl;
+                return false;
+            }
+            
+            // Check if already applied
+            unique_ptr<sql::PreparedStatement> checkStmt(
+                conn->prepareStatement("SELECT application_id FROM applications WHERE student_id = ? AND job_id = ?")
+            );
+            checkStmt->setInt(1, studentId);
+            checkStmt->setInt(2, jobId);
+            
+            unique_ptr<sql::ResultSet> checkRes(checkStmt->executeQuery());
+            if (checkRes->next()) {
+                cout << "❌ You have already applied for this job!" << endl;
+                return false;
+            }
+            
+            // Apply
+            unique_ptr<sql::PreparedStatement> applyStmt(
+                conn->prepareStatement(
+                    "INSERT INTO applications (student_id, job_id, status) VALUES (?, ?, 'Applied')"
+                )
+            );
+            applyStmt->setInt(1, studentId);
+            applyStmt->setInt(2, jobId);
+            
+            if (applyStmt->executeUpdate()) {
+                cout << "✅ Application submitted successfully!" << endl;
+                cout << "Student: " << studentName << " applied for " << jobTitle << " at " << companyName << endl;
+                return true;
+            }
+            
+        } catch (sql::SQLException &e) {
+            cerr << "Error applying for job: " << e.what() << endl;
+        }
+        return false;
+    }
+    
+    // View applications for a job (for companies/admin)
+    void viewJobApplications(int jobId) {
+        try {
+            unique_ptr<sql::PreparedStatement> pstmt(
+                conn->prepareStatement(
+                    "SELECT a.application_id, a.student_id, s.name as student_name, "
+                    "s.roll_number, s.department, s.semester, s.cgpa, a.status, a.application_date "
+                    "FROM applications a "
+                    "JOIN students s ON a.student_id = s.student_id "
+                    "WHERE a.job_id = ?"
+                )
+            );
+            pstmt->setInt(1, jobId);
+            
+            unique_ptr<sql::ResultSet> res(pstmt->executeQuery());
+            
+            cout << "\n=== APPLICATIONS FOR JOB ID " << jobId << " ===" << endl;
+            cout << left << setw(8) << "App ID" 
+                 << setw(8) << "Stu ID"
+                 << setw(25) << "Student Name"
+                 << setw(15) << "Roll No"
+                 << setw(15) << "Department"
+                 << setw(8) << "CGPA"
+                 << setw(12) << "Status"
+                 << "Applied Date" << endl;
+            cout << string(110, '-') << endl;
+            
+            bool found = false;
+            while (res->next()) {
+                found = true;
+                cout << left << setw(8) << res->getInt("application_id")
+                     << setw(8) << res->getInt("student_id")
+                     << setw(25) << res->getString("student_name")
+                     << setw(15) << res->getString("roll_number")
+                     << setw(15) << res->getString("department")
+                     << setw(8) << fixed << setprecision(2) << res->getDouble("cgpa")
+                     << setw(12) << res->getString("status")
+                     << res->getString("application_date") << endl;
+            }
+            
+            if (!found) {
+                cout << "No applications for this job yet." << endl;
+            }
+            
+        } catch (sql::SQLException &e) {
+            cerr << "Error: " << e.what() << endl;
+        }
+    }
+    
+    // View applications by student
+    void viewStudentApplications(int studentId) {
+        try {
+            unique_ptr<sql::PreparedStatement> pstmt(
+                conn->prepareStatement(
+                    "SELECT a.application_id, a.job_id, j.job_title, c.company_name, "
+                    "a.status, a.application_date, a.interview_date "
+                    "FROM applications a "
+                    "JOIN jobs j ON a.job_id = j.job_id "
+                    "JOIN companies c ON j.company_id = c.company_id "
+                    "WHERE a.student_id = ?"
+                )
+            );
+            pstmt->setInt(1, studentId);
+            
+            unique_ptr<sql::ResultSet> res(pstmt->executeQuery());
+            
+            cout << "\n=== APPLICATIONS FOR STUDENT ===" << endl;
+            
+            bool found = false;
+            while (res->next()) {
+                found = true;
+                cout << "\nApplication ID: " << res->getInt("application_id") << endl;
+                cout << "Job: " << res->getString("job_title") << " at " << res->getString("company_name") << endl;
+                cout << "Status: " << res->getString("status") << endl;
+                cout << "Applied on: " << res->getString("application_date") << endl;
+                if (res->getString("interview_date") != "0000-00-00") {
+                    cout << "Interview Date: " << res->getString("interview_date") << endl;
+                }
+            }
+            
+            if (!found) {
+                cout << "No applications found." << endl;
+            }
+            
+        } catch (sql::SQLException &e) {
+            cerr << "Error: " << e.what() << endl;
+        }
+    }
+    
+    // Update application status
+    bool updateApplicationStatus() {
+        try {
+            int applicationId;
+            string status;
+            string interviewDate;
+            
+            cout << "\n=== UPDATE APPLICATION STATUS ===" << endl;
+            cout << "Enter Application ID: ";
+            cin >> applicationId;
+            
+            // Check if application exists
+            unique_ptr<sql::PreparedStatement> checkStmt(
+                conn->prepareStatement("SELECT a.*, s.name as student_name FROM applications a JOIN students s ON a.student_id = s.student_id WHERE a.application_id = ?")
+            );
+            checkStmt->setInt(1, applicationId);
+            
+            unique_ptr<sql::ResultSet> checkRes(checkStmt->executeQuery());
+            if (!checkRes->next()) {
+                cout << "❌ Application not found!" << endl;
+                return false;
+            }
+            
+            cout << "Current Status: " << checkRes->getString("status") << endl;
+            cout << "Student: " <<
