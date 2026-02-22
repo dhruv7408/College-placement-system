@@ -1,0 +1,94 @@
+-- Create database
+CREATE DATABASE IF NOT EXISTS placement_system;
+USE placement_system;
+
+-- Students table
+CREATE TABLE students (
+    student_id INT PRIMARY KEY AUTO_INCREMENT,
+    roll_number VARCHAR(20) UNIQUE NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    phone VARCHAR(15),
+    department VARCHAR(50),
+    semester INT,
+    cgpa DECIMAL(3,2),
+    skills TEXT,
+    resume_path VARCHAR(255),
+    placement_status ENUM('Not Placed', 'Placed', 'Not Eligible') DEFAULT 'Not Placed',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Companies table
+CREATE TABLE companies (
+    company_id INT PRIMARY KEY AUTO_INCREMENT,
+    company_name VARCHAR(100) NOT NULL,
+    industry VARCHAR(50),
+    location VARCHAR(100),
+    website VARCHAR(255),
+    contact_email VARCHAR(100),
+    contact_phone VARCHAR(15),
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Jobs/Placement Drives table
+CREATE TABLE jobs (
+    job_id INT PRIMARY KEY AUTO_INCREMENT,
+    company_id INT,
+    job_title VARCHAR(100) NOT NULL,
+    job_description TEXT,
+    package DECIMAL(10,2),
+    location VARCHAR(100),
+    eligibility_criteria TEXT,
+    min_cgpa DECIMAL(3,2),
+    last_application_date DATE,
+    drive_date DATE,
+    status ENUM('Open', 'Closed', 'Completed') DEFAULT 'Open',
+    FOREIGN KEY (company_id) REFERENCES companies(company_id) ON DELETE CASCADE
+);
+
+-- Applications table
+CREATE TABLE applications (
+    application_id INT PRIMARY KEY AUTO_INCREMENT,
+    student_id INT,
+    job_id INT,
+    application_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status ENUM('Applied', 'Shortlisted', 'Selected', 'Rejected') DEFAULT 'Applied',
+    interview_date DATE,
+    feedback TEXT,
+    FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE,
+    FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE CASCADE,
+    UNIQUE KEY unique_application (student_id, job_id)
+);
+
+-- Placement Records table
+CREATE TABLE placements (
+    placement_id INT PRIMARY KEY AUTO_INCREMENT,
+    student_id INT,
+    job_id INT,
+    placement_date DATE,
+    joining_date DATE,
+    offer_letter_path VARCHAR(255),
+    status ENUM('Accepted', 'Declined') DEFAULT 'Accepted',
+    FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE,
+    FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE CASCADE
+);
+
+-- Sample Data
+INSERT INTO students (roll_number, name, email, phone, department, semester, cgpa, skills) VALUES
+('CS001', 'Amit Kumar', 'amit@college.edu', '9876543210', 'Computer Science', 8, 8.5, 'C++, Java, Python, SQL'),
+('CS002', 'Priya Sharma', 'priya@college.edu', '9876543211', 'Computer Science', 8, 9.2, 'Python, JavaScript, React, MongoDB'),
+('EC001', 'Rahul Verma', 'rahul@college.edu', '9876543212', 'Electronics', 8, 7.8, 'C, Embedded Systems, VLSI'),
+('ME001', 'Anjali Patel', 'anjali@college.edu', '9876543213', 'Mechanical', 8, 8.0, 'AutoCAD, SolidWorks, ANSYS');
+
+INSERT INTO companies (company_name, industry, location, contact_email) VALUES
+('Google', 'IT', 'Bangalore', 'hr@google.com'),
+('Microsoft', 'IT', 'Hyderabad', 'careers@microsoft.com'),
+('Amazon', 'E-commerce', 'Chennai', 'jobs@amazon.com'),
+('Tesla', 'Automotive', 'Mumbai', 'hr@tesla.com');
+
+INSERT INTO jobs (company_id, job_title, package, location, min_cgpa, last_application_date, drive_date) VALUES
+(1, 'Software Engineer', 1200000, 'Bangalore', 8.0, '2025-03-15', '2025-03-20'),
+(1, 'Data Analyst', 1000000, 'Bangalore', 7.5, '2025-03-15', '2025-03-21'),
+(2, 'Cloud Engineer', 1500000, 'Hyderabad', 8.5, '2025-03-20', '2025-03-25'),
+(3, 'SDE Intern', 600000, 'Chennai', 7.0, '2025-03-10', '2025-03-15');
